@@ -1,5 +1,3 @@
-'use server'
-// Next.js API route support: https://nextjs.org/docs/api-routes/introduction
 import type { NextApiRequest, NextApiResponse } from "next";
 import { createClient } from "@/utils/supabase/api";
 
@@ -9,69 +7,54 @@ type Data = {
 
 export default async function Handler(
     req: NextApiRequest,
-    res: NextApiResponse<Data>,
+    res: NextApiResponse<Data>
 ) {
-
     if (req.method !== 'POST') {
-        res.status(405).json({ name: "Method Not Allowed" });
-        return;
+        return res.status(405).json({ name: "Method Not Allowed" });
     }
-    const { headers } = req;
-    const token = headers["authorization"]?.split(" ")[1];
-    console.log(token);
 
+    const token = req.headers["authorization"]?.split(" ")[1];
     const { JSESSION } = req.body;
 
     if (!JSESSION) {
-        //faltou parametros
-        res.status(400).json({ name: "Bad Request" });
-        return;
+        return res.status(400).json({ name: "Bad Request" });
     }
 
-    if (token) {
-        const supabase = createClient();
-
-        //consultar tabela bridges
-        const { data, error } = await supabase
-            .from("bridges")
-            .select("*")
-            .eq('code', token);
-
-        if (error) {
-            console.log(error);
-            res.status(401).json({ name: "Unauthorized" });
-            return;
-        }
-
-        if (data.length > 0) {
-            const bridge = data[0];
-
-            const { data: team_data, error: team_error } = await supabase
-                .from("teams")
-                .select("*")
-                .eq('id', bridge?.team_id);
-
-            if (team_data) {
-                const team = team_data[0];
-                let config = team?.config;
-                config.JSESSION = JSESSION;
-
-                const { error } = await supabase
-                    .from("teams")
-                    .update({ config: config })
-                    .eq('id', team?.id);
-                if (error) {
-                    console.log(error);
-                    res.status(500).json({ name: "Internal Server Error" });
-                    return;
-                }
-
-                res.status(200).json({ name: "OK" });
-                return;
-            }
-        }
-        res.status(401).json({ name: "Unauthorized" });
-    } else {
-        res.status(401).json({ name: "Unauthorized" });
+    if (!token) {
+        return res.status(401).json({ name: "Unauthorized" });
     }
+
+    const supabase = createClient();
+    const { data: bridgeData, error: bridgeError } = await supabase
+        .from("bridges")
+        .select("team_id")
+        .eq('code', token)
+        .single();
+
+    if (bridgeError || !bridgeData) {
+        return res.status(401).json({ name: "Unauthorized" });
+    }
+
+    const { data: teamData, error: teamError } = await supabase
+        .from("teams")
+        .select("id, config")
+        .eq('id', bridgeData.team_id)
+        .single();
+
+    if (teamError || !teamData) {
+        return res.status(401).json({ name: "Unauthorized" });
+    }
+
+    const updatedConfig = { ...teamData.config, JSESSION };
+    const { error: updateError } = await supabase
+        .from("teams")
+        .update({ config: updatedConfig })
+        .eq('id', teamData.id);
+
+    if (updateError) {
+        console.log(updateError);
+        return res.status(500).json({ name: "Internal Server Error" });
+    }
+
+    res.status(200).json({ name: "OK" });
 }
